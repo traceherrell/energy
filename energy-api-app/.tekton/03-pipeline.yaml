@@ -1,9 +1,3 @@
-######################################################################
-# PIPELINE: The Complete Workflow
-#
-# This Pipeline chains the tasks together, passing results from one
-# to the next.
-######################################################################
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
@@ -27,6 +21,12 @@ spec:
       type: string
       description: The path to the deployment manifest in the deployment repo.
       default: "deployment.yaml"
+    - name: GIT_USER_NAME
+      type: string
+      description: Git user name for commit
+    - name: GIT_USER_EMAIL
+      type: string
+      description: Git user email for commit
   workspaces:
     - name: shared-workspace
       description: Workspace for sharing source code and other artifacts.
@@ -34,7 +34,8 @@ spec:
     - name: fetch-source-code
       taskRef:
         name: git-clone
-        kind: ClusterTask # Using the pre-installed ClusterTask
+        kind: ClusterTask
+        apiVersion: tekton.dev/v1
       workspaces:
         - name: output
           workspace: shared-workspace
@@ -56,14 +57,14 @@ spec:
           value: $(params.image-url)
 
     - name: fetch-deploy-repo
-      # Run this concurrently with the build
       taskRef:
         name: git-clone
-        kind: ClusterTask # Using the pre-installed ClusterTask
+        kind: ClusterTask
+        apiVersion: tekton.dev/v1
       workspaces:
         - name: output
           workspace: shared-workspace
-          subPath: deploy-repo # Clone into a sub-directory to avoid conflicts
+          subPath: deploy-repo
       params:
         - name: url
           value: $(params.deployment-repo-url)
@@ -86,5 +87,6 @@ spec:
         - name: MANIFEST_PATH
           value: $(params.manifest-path)
         - name: GIT_USER_NAME
-          value: "Tekton Pipeline"
+          value: $(params.GIT_USER_NAME)
         - name: GIT_USER_EMAIL
+          value: $(params.GIT_USER_EMAIL)
