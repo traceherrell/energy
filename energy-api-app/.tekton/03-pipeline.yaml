@@ -8,6 +8,7 @@ apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
   name: dotnet-gitops-pipeline
+  namespace: energy-api-app
 spec:
   description: >-
     This pipeline builds a .NET application, pushes the image to Quay.io,

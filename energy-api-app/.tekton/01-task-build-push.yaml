@@ -9,6 +9,7 @@ apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: dotnet-build-push
+  namespace: energy-api-app
 spec:
   description: >-
     Builds a .NET application using a Dockerfile and pushes the

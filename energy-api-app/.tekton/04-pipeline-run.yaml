@@ -8,6 +8,7 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   generateName: dotnet-gitops-run-
+  namespace: energy-api-app
 spec:
   pipelineRef:
     name: dotnet-gitops-pipeline

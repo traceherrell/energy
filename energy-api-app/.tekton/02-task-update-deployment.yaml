@@ -8,6 +8,7 @@ apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: git-update-deployment
+  namespace: energy-api-app
 spec:
   description: >-
     Clones a git repository, updates a deployment manifest with a new

@@ -7,8 +7,6 @@ This directory contains all the necessary Tekton resources to create a fully aut
 
 The pipeline automates the following workflow:
 
-
-
 1. **Trigger**: Automatically starts when code is pushed to the application's GitHub repository.
 2. **Clone & Build**: Clones the application source code and uses buildah to build a new container image from the Dockerfile.
 3. **Push to Registry**: Pushes the newly built container image to a Quay.io repository.
