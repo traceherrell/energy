@@ -7,7 +7,7 @@ metadata:
   name: energy-api-build-and-deploy
 spec:
   description: |
-    This pipeline clones a .NET application, builds it with s2i,
+    This pipeline clones a .NET application, builds it with buildah,
     pushes the image to Quay.io, and then updates the corresponding
     deployment manifest in a separate Git repository.
   params:
@@ -91,8 +91,8 @@ spec:
         - name: GIT_REPO_URL
           value: $(params.DEPLOY_REPO_URL)
         - name: YAML_FILE_PATH
-          value: "deploy.yaml" # Assuming the file is at the root of the deploy repo
+          value: $(params.DEPLOY_YAML_PATH) # Use the  pipeline parameter
         - name: YAML_UPDATE_PATH
           value: "spec.template.spec.containers[0].image" # Path to the image key in your deploy.yaml
         - name: NEW_IMAGE_URL
-          value: "$(tasks.build-and-push-image.results.IMAGE_DIGEST)" # Use the digest from the build task
+          value: "$(params.IMAGE_URL)@$(tasks.build-and-push-image.results.IMAGE_DIGEST)"

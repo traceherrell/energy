@@ -21,7 +21,7 @@ spec:
       description: The path to the YAML file to update within the repo.
       type: string
     - name: YAML_UPDATE_PATH
-      description: The 'yq' path to the key to update (e.g., 'spec.template.spec.containers[0].image').
+      description: The 'yq' path to the key to update (e.g., '.spec.template.spec.containers[0].image').
       type: string
     - name: NEW_IMAGE_URL
       description: The new container image URL to set in the YAML file.
@@ -39,17 +39,40 @@ spec:
       description: A workspace for cloning the git repository.
   steps:
     - name: update-and-push
-      image: alpine:3.18 # A stable, public base image
+      image: alpine/git:latest # Using a standard git image for better compatibility
       workingDir: $(workspaces.source.path)
+      env:
+        - name: GIT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: git-deploy-credentials
+              key: username
+        - name: GIT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: git-deploy-credentials
+              key: password
       script: |
         #!/bin/sh
         set -ex
 
-        # Install necessary tools
-        apk add --no-cache git yq
+        # Install necessary tools (yq)
+        apk add --no-cache yq
 
+        # Export params to environment variables to avoid shell quoting issues
+        export YQ_PATH=".$(params.YAML_UPDATE_PATH)"
+        export YQ_IMAGE_URL="$(params.NEW_IMAGE_URL)"
+        export YQ_FILE="$(params.YAML_FILE_PATH)"
+
+        # Construct a new remote URL that includes the credentials from the secret
+        AUTHENTICATED_URL=$(echo "$(params.GIT_REPO_URL)" | sed "s,https://,https://${GIT_USERNAME}:${GIT_PASSWORD}@,")
+
+        # Temporarily disable command tracing to prevent logging the secret token
+        set +x
         # Clone the repository into a new subdirectory to avoid conflicts
-        git clone -b $(params.GIT_REVISION) $(params.GIT_REPO_URL) deploy-repo
+        git clone -b $(params.GIT_REVISION) "${AUTHENTICATED_URL}" deploy-repo
+        # Re-enable command tracing
+        set -x
 
         # Change into the newly cloned directory
         cd deploy-repo
@@ -58,15 +81,19 @@ spec:
         git config user.email "$(params.GIT_USER_EMAIL)"
         git config user.name "$(params.GIT_USER_NAME)"
 
-        # Update the YAML file. The path is now relative to this directory.
-        yq -i '$(params.YAML_UPDATE_PATH) = "$(params.NEW_IMAGE_URL)"' $(params.YAML_FILE_PATH)
+        # Update the YAML file using output redirection for better compatibility
+        yq eval "${YQ_PATH} = \"${YQ_IMAGE_URL}\"" "${YQ_FILE}" > temp.yaml && mv temp.yaml "${YQ_FILE}"
 
-        echo "--- Updated $(params.YAML_FILE_PATH) ---"
-        cat $(params.YAML_FILE_PATH)
+        echo "--- Updated ${YQ_FILE} ---"
+        cat "${YQ_FILE}"
         echo "------------------------------------"
 
         # Commit and push the changes
-        git add $(params.YAML_FILE_PATH)
-        # Use --allow-empty in case the image digest is the same, preventing an error
-        git commit --allow-empty -m "ci: Update image to $(params.NEW_IMAGE_URL)"
-        git push origin $(params.GIT_REVISION)
+        git add "${YQ_FILE}"
+        git commit --allow-empty -m "ci: Update image to ${YQ_IMAGE_URL}"
+
+        # Temporarily disable command tracing again for the push command
+        set +x
+        # Push to the remote URL that includes the credentials
+        git push "${AUTHENTICATED_URL}" $(params.GIT_REVISION)
+        set -x
