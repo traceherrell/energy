@@ -20,6 +20,10 @@ spec:
     - name: IMAGE_URL
       type: string
       description: The full URL of the image to build and push (e.g., quay.io/user/app).
+    - name: DEPLOY_YAML_PATH
+      type: string
+      description: The path to the deployment YAML file within the deploy repo.
+      default: "deploy.yaml"
   workspaces:
     - name: shared-workspace
       description: |

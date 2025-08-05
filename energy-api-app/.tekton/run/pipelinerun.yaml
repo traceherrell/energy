@@ -25,3 +25,5 @@ spec:
       value: "https://github.com/traceherrell/energy-deploy"
     - name: IMAGE_URL
       value: "quay.io/therrell/energy-app-api"
+    - name: DEPLOY_YAML_PATH
+      value: "base/deploy.yaml"
