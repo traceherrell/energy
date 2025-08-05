@@ -1,0 +1,27 @@
+# .tekton/run/pipelinerun.yaml
+# This PipelineRun is an instance of the Pipeline. Applying this file
+# will trigger a new run of the 'energy-api-build-and-deploy' pipeline
+# with the parameters specified below.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  # generateName is used to create a unique name for each run
+  generateName: energy-api-run-
+spec:
+  pipelineRef:
+    name: energy-api-build-and-deploy
+  serviceAccountName: pipeline-sa # The service account we created
+  workspaces:
+    - name: shared-workspace
+      persistentVolumeClaim:
+        claimName: tekton-pvc # The PVC we created
+    - name: docker-credentials
+      secret:
+        secretName: quay-secret
+  params:
+    - name: APP_REPO_URL
+      value: "https://github.com/traceherrell/energy"
+    - name: DEPLOY_REPO_URL
+      value: "https://github.com/traceherrell/energy-deploy"
+    - name: IMAGE_URL
+      value: "quay.io/therrell/energy-app-api"

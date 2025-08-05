@@ -1,126 +1,104 @@
-# **.NET GitOps CI/CD Pipeline for OpenShift**
+# **Tekton Pipeline for the .NET Energy API**
 
-This directory contains all the necessary Tekton resources to create a fully automated CI/CD pipeline for a .NET application. The pipeline follows GitOps best practices.
+This directory contains all the necessary Tekton resources to build the .NET application using a Dockerfile, push the resulting image to Quay.io, and update the deployment manifest in the corresponding deployment repository.
 
+## **Directory Structure**
 
-## **Pipeline Workflow**
+.  
+├── README.md               \<-- This file  
+├── pipeline.yaml           \<-- The main pipeline definition using buildah  
+├── run  
+│   └── pipelinerun.yaml    \<-- An example of how to run the pipeline  
+├── setup  
+│   ├── 01-pvc.yaml         \<-- A PersistentVolumeClaim for the pipeline workspace  
+│   ├── 02-secrets.yaml     \<-- A reference for the required secrets  
+│   └── 03-service-account.yaml \<-- ServiceAccount for the pipeline to use  
+└── tasks  
+    └── git-update-deployment.yaml \<-- Custom task to update the deployment YAML
 
-The pipeline automates the following workflow:
+## **Prerequisites**
 
-1. **Trigger**: Automatically starts when code is pushed to the application's GitHub repository.
-2. **Clone & Build**: Clones the application source code and uses buildah to build a new container image from the Dockerfile.
-3. **Push to Registry**: Pushes the newly built container image to a Quay.io repository.
-4. **Update Deployment Repo**: Clones a separate deployment repository (used by Argo CD), updates the Kubernetes deployment manifest with the new image digest (e.g., image: quay.io/my-org/my-app@sha256:...), and pushes the change back to the deployment repository.
-5. **Argo** CD** Sync**: The push to the deployment repository triggers Argo CD to automatically sync the new version of the application to the OpenShift cluster.
+1. **OpenShift Pipelines Operator:** Ensure the Tekton operator is installed on your OpenShift cluster.  
+2. **tkn CLI (Optional):** The Tekton CLI is useful for interacting with pipelines, but you can also use oc or kubectl.  
+3. **Quay.io Robot Account:** You need a robot account token for your Quay.io repository (quay.io/therrell/energy-app-api).  
+4. **GitHub Personal Access Token (PAT):** You need a PAT with repo scope to allow the pipeline to push changes to your energy-deploy repository.
 
+## **Setup Instructions**
 
-## **1. Prerequisites**
+Follow these steps to configure and run the pipeline.
 
-Before you can use this pipeline, you must create several resources on your OpenShift cluster. These steps only need to be done once.
+### **1\. Create the Namespace**
 
+Create a dedicated namespace (or project in OpenShift) for your CI/CD resources.
 
-### **a. Quay.io Credentials Secret**
+oc new-project energy-api-ci
 
-This secret allows the pipeline to push the container image to your Quay.io repository. It's recommended to use a [Robot](https://docs.quay.io/glossary/robot-accounts.html) Account token for the password.
+### **2\. Create the Secrets**
 
-# Replace with your actual Quay.io credentials/robot token 
-```
-oc create secret docker-registry quay-credentials \ 
-  --docker-server=quay.io \ 
-  --docker-username="your-quay-username" \ 
-  --docker-password="your-quay-robot-token" 
-```
+The pipeline requires two secrets: one for pushing to Quay.io and one for pushing to GitHub.
 
+#### **Quay.io Secret (Using oc)**
 
+This is the recommended method as it creates the secret in the exact format buildah requires. Run the following command, replacing the placeholder with your robot account's token.
 
-### **b. Git Deploy Repo Credentials Secret**
+oc create secret docker-registry quay-secret \\  
+  \--docker-server=quay.io \\  
+  \--docker-username='therrell+robot' \\  
+  \--docker-password='YOUR\_QUAY\_TOKEN\_HERE' \\  
+  \--docker-email='any-email@example.com' \\  
+  \-n energy-api-ci
 
-This secret allows the pipeline to commit and push changes to your Argo CD deployment repository. Use a [GitHub Personal Access Token (PAT)](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) with repo scope for the password.
+#### **GitHub Secret**
 
-# Replace with your Git username and Personal Access Token 
-```
-oc create secret generic git-deploy-credentials \ 
-  --from-literal=username=your-git-username \ 
-  --from-literal=password=your-git-personal-access-token 
-```
+1. **Get your Base64 encoded credentials:**  
+   \# Use your GitHub username and your Personal Access Token (PAT)  
+   echo \-n 'your-github-username:YOUR\_GITHUB\_PAT' | base64
 
+2. **Create a github-secret.yaml file:**  
+   apiVersion: v1  
+   kind: Secret  
+   metadata:  
+     name: git-deploy-credentials  
+     annotations:  
+       tekton.dev/git-0: \[https://github.com\](https://github.com)  
+   type: kubernetes.io/basic-auth  
+   data:  
+     username: PASTE\_ENCODED\_USERNAME\_HERE  
+     password: PASTE\_ENCODED\_PAT\_HERE
 
-### **c. Service Account**
+3. **Apply the secret:**  
+   oc apply \-f github-secret.yaml \-n energy-api-ci
 
-Create a dedicated ServiceAccount for the pipeline and link the secrets to it. This gives the pipeline the necessary permissions to access Quay.io and GitHub.
+### **3\. Apply Setup, Task, and Pipeline Files**
 
-# Create the ServiceAccount 
-```
-oc create serviceaccount pipeline-sa 
-```
- 
-# Link the secrets to the ServiceAccount 
-```
-oc patch serviceaccount pipeline-sa \ 
-  -p '{"secrets": [{"name": "quay-credentials"}, {"name": "git-deploy-credentials"}]}' 
-```
+Apply the rest of the configuration files in the correct order.
 
+\# Apply the Persistent Volume Claim for the workspace  
+oc apply \-f setup/01-pvc.yaml \-n energy-api-ci
 
+\# Apply the Service Account that links the secrets  
+oc apply \-f setup/03-service-account.yaml \-n energy-api-ci
 
-### **d. Persistent Volume Claim (PVC)**
+\# Apply the custom task definition  
+oc apply \-f tasks/git-update-deployment.yaml \-n energy-api-ci
 
-The pipeline needs a workspace to store cloned repositories and other artifacts. Create a PersistentVolumeClaim for this purpose.
+\# Apply the main pipeline definition  
+oc apply \-f pipeline.yaml \-n energy-api-ci
 
-# Create a file named tekton-pvc.yaml 
-```yaml
-apiVersion: v1 
-kind: PersistentVolumeClaim 
-metadata: 
-  name: tekton-pvc 
-spec: 
-  accessModes: 
-    - ReadWriteOnce 
-  resources: 
-    requests: 
-      storage: 1Gi 
-```
+### **4\. Run the Pipeline**
 
+The pipeline is triggered by creating a PipelineRun resource. An example is provided in run/pipelinerun.yaml.
 
-Apply it with:``` oc apply -f tekton-pvc.yaml```
+oc apply \-f run/pipelinerun.yaml \-n energy-api-ci
 
+### **5\. Monitor the PipelineRun**
 
-## **2. Pipeline Installation**
+You can watch the pipeline execute using the tkn CLI:
 
-Apply the Tekton resource definitions from this directory to your OpenShift project.
+\# Get the name of the latest pipelinerun  
+PIPELINERUN\_NAME=$(tkn pipelinerun list \-n energy-api-ci \-o jsonpath='{.items\[0\].metadata.name}')
 
-# Apply the Tasks, Pipeline, and Trigger definitions 
-``` oc apply -f . ```
+\# Follow the logs  
+tkn pipelinerun logs $PIPELINERUN\_NAME \-f \-n energy-api-ci
 
-
-
-## **3. Automatic Trigger Setup (GitHub Webhook)**
-
-To have the pipeline run automatically on every git push, you must configure a webhook in your .NET application's GitHub repository.
-
-
-### **a. Get the EventListener Route URL**
-
-First, get the public URL for the EventListener that was created in the previous step.
-```
-oc get route el-dotnet-gitops-listener -o jsonpath='{.spec.host}' 
-```
-
-
-This will output a URL, for example: el-dotnet-gitops-listener-my-project.apps.my-cluster.com
-
-
-### **b. Create the Webhook in GitHub**
-
-
-
-1. Navigate to your .NET application's repository on GitHub.
-2. Go to **Settings** > **Webhooks**.
-3. Click **Add webhook**.
-4. **Payload URL**: Paste the URL you retrieved from the oc get route command.
-5. **Content type**: Change this to application/json.
-6. **Secret**: You can leave this blank for now. For production, you would add a secret and configure a Tekton Interceptor to validate it.
-7. **Which events would you like to trigger this webhook?**: Select **Just the push event**.
-8. Ensure **Active** is checked.
-9. Click **Add webhook**.
-
-Now, every time you push a commit to this repository, it will automatically trigger a new pipeline run.
+You can also view the pipeline's progress visually in the OpenShift Developer Console under the **Pipelines** section.

@@ -1,0 +1,94 @@
+# .tekton/pipeline.yaml
+# This is the main Pipeline definition. It chains together the tasks
+# required to build the .NET app and update the deployment manifest.
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: energy-api-build-and-deploy
+spec:
+  description: |
+    This pipeline clones a .NET application, builds it with s2i,
+    pushes the image to Quay.io, and then updates the corresponding
+    deployment manifest in a separate Git repository.
+  params:
+    - name: APP_REPO_URL
+      type: string
+      description: The URL of the application's source code repository.
+    - name: DEPLOY_REPO_URL
+      type: string
+      description: The URL of the deployment manifest repository.
+    - name: IMAGE_URL
+      type: string
+      description: The full URL of the image to build and push (e.g., quay.io/user/app).
+  workspaces:
+    - name: shared-workspace
+      description: |
+        This workspace will be used by all tasks to share data,
+        such as the cloned source code.
+    - name: docker-credentials
+      description: The workspace for docker credentials from the quay-secret.
+
+  tasks:
+    - name: fetch-source-code
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: git-clone
+          - name: namespace
+            value: openshift-pipelines # Namespace where ClusterTasks are installed
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+      params:
+        - name: URL
+          value: $(params.APP_REPO_URL)
+        - name: revision
+          value: main
+
+    - name: build-and-push-image
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: buildah
+          - name: namespace
+            value: openshift-pipelines # Namespace where ClusterTasks are installed
+      runAfter:
+        - fetch-source-code
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+        - name: dockerconfig # The name the buildah task expects
+          workspace: docker-credentials # The name we defined in the PipelineRun
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE_URL)
+        - name: DOCKERFILE
+          value: ./energy-api-app/Dockerfile
+        - name: CONTEXT
+          value: ./energy-api-app
+        - name: TLSVERIFY
+          value: "false"
+
+    - name: update-deployment-manifest
+      taskRef:
+        name: git-update-deployment # Our custom task, no resolver needed
+      runAfter:
+        - build-and-push-image
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      params:
+        - name: GIT_REPO_URL
+          value: $(params.DEPLOY_REPO_URL)
+        - name: YAML_FILE_PATH
+          value: "deploy.yaml" # Assuming the file is at the root of the deploy repo
+        - name: YAML_UPDATE_PATH
+          value: "spec.template.spec.containers[0].image" # Path to the image key in your deploy.yaml
+        - name: NEW_IMAGE_URL
+          value: "$(tasks.build-and-push-image.results.IMAGE_DIGEST)" # Use the digest from the build task

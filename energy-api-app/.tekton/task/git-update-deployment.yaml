@@ -1,0 +1,72 @@
+# .tekton/tasks/git-update-deployment.yaml
+# This custom Tekton Task clones a Git repository, uses yq to update a yaml file,
+# and pushes the changes back to the remote.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: git-update-deployment
+spec:
+  description: >-
+    This task clones a git repository, uses yq to update a yaml file,
+    and pushes the changes back to the remote.
+  params:
+    - name: GIT_REPO_URL
+      description: The URL of the git repository to clone.
+      type: string
+    - name: GIT_REVISION
+      description: The git revision (branch) to clone.
+      default: main
+      type: string
+    - name: YAML_FILE_PATH
+      description: The path to the YAML file to update within the repo.
+      type: string
+    - name: YAML_UPDATE_PATH
+      description: The 'yq' path to the key to update (e.g., 'spec.template.spec.containers[0].image').
+      type: string
+    - name: NEW_IMAGE_URL
+      description: The new container image URL to set in the YAML file.
+      type: string
+    - name: GIT_USER_NAME
+      description: The git user name for the commit.
+      default: "Tekton Pipeline"
+      type: string
+    - name: GIT_USER_EMAIL
+      description: The git user email for the commit.
+      default: "tekton@example.com"
+      type: string
+  workspaces:
+    - name: source
+      description: A workspace for cloning the git repository.
+  steps:
+    - name: update-and-push
+      image: alpine:3.18 # A stable, public base image
+      workingDir: $(workspaces.source.path)
+      script: |
+        #!/bin/sh
+        set -ex
+
+        # Install necessary tools
+        apk add --no-cache git yq
+
+        # Clone the repository into a new subdirectory to avoid conflicts
+        git clone -b $(params.GIT_REVISION) $(params.GIT_REPO_URL) deploy-repo
+
+        # Change into the newly cloned directory
+        cd deploy-repo
+
+        # Configure git for this specific repository
+        git config user.email "$(params.GIT_USER_EMAIL)"
+        git config user.name "$(params.GIT_USER_NAME)"
+
+        # Update the YAML file. The path is now relative to this directory.
+        yq -i '$(params.YAML_UPDATE_PATH) = "$(params.NEW_IMAGE_URL)"' $(params.YAML_FILE_PATH)
+
+        echo "--- Updated $(params.YAML_FILE_PATH) ---"
+        cat $(params.YAML_FILE_PATH)
+        echo "------------------------------------"
+
+        # Commit and push the changes
+        git add $(params.YAML_FILE_PATH)
+        # Use --allow-empty in case the image digest is the same, preventing an error
+        git commit --allow-empty -m "ci: Update image to $(params.NEW_IMAGE_URL)"
+        git push origin $(params.GIT_REVISION)
